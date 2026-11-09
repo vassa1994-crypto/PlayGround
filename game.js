@@ -14,7 +14,9 @@
   const starter = () => ({money:1250, day:1, wins:0, fossils:0, research:0, visitors:38, hunger:32, level:1, xp:0, energy:3, owned:['moss','starterTree'], placements:{6:{id:'moss',name:'Moss',emoji:'🦕',type:'dino'},13:{id:'starterTree',name:'Old fern',emoji:'🌳',type:'decor'}}, inventory:[], bought:[], lastCollect:0});
   let state;
   try { state = {...starter(), ...JSON.parse(localStorage.getItem('fern-fossil-save')||'{}')}; } catch { state=starter(); }
-  state.placements ||= starter().placements; state.inventory ||= []; state.bought ||= [];
+  state.placements ||= starter().placements; state.inventory ||= []; state.bought ||= []; state.owned ||= starter().owned;
+  // Older saves only tracked ownership for dinosaurs. Rebuild ownership from the park and inventory.
+  state.owned = [...new Set([...state.owned, ...state.inventory, ...Object.values(state.placements).map(item=>item.id)])];
   let pending=null, battle=null, toastTimer;
   const save=()=>{localStorage.setItem('fern-fossil-save',JSON.stringify(state));renderStats();};
   function renderStats(){
@@ -48,14 +50,16 @@
     if(pending){
       if(state.placements[i]){toast('That plot is already occupied. Try an open plot!');return;}
       const item=pending;state.placements[i]={id:item.id,name:item.short||item.name.split(' ')[0],emoji:item.emoji,type:item.category==='dino'?'dino':item.category};
-      if(item.category==='dino')state.owned.push(item.id);state.inventory=state.inventory.filter(x=>x!==item.id);state.visitors+=item.category==='dino'?14:8;state.bought.push(item.id);pending=null;
+      state.owned=[...new Set([...state.owned,item.id])];state.inventory=state.inventory.filter(x=>x!==item.id);state.visitors+=item.category==='dino'?14:8;state.bought.push(item.id);pending=null;
       $('#placeModal').classList.add('hidden');renderMap();save();renderShop();toast(`${item.name} found a lovely spot!`);return;
     }
     if(state.placements[i]){toast(`${state.placements[i].name} looks right at home!`);return;}
     toast('Visit the Supply shop to choose something for this plot.');
   }
   $('#zoomBtn').addEventListener('click',()=>map.classList.toggle('zoomed'));
-  $('#closePlace').addEventListener('click',()=>{$('#placeModal').classList.add('hidden');pending=null;});$('#cancelPlace').addEventListener('click',()=>$('#placeModal').classList.add('hidden'));
+  $('#closePlace').addEventListener('click',()=>{$('#placeModal').classList.add('hidden');pending=null;});
+  $('#cancelPlace').addEventListener('click',()=>{$('#placeModal').classList.add('hidden');map.scrollIntoView({behavior:'smooth',block:'center'});});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#placeModal').classList.contains('hidden')){$('#placeModal').classList.add('hidden');pending=null;}});
   function openPlacement(item){pending=item;$('#placeEmoji').textContent=item.emoji;$('#placeTitle').textContent=`Place ${item.name}`;$('#placeDescription').textContent=item.category==='dino'?'Pick a peaceful plot for your new dinosaur.':'Choose an open plot on your park map.';$('#placeModal').classList.remove('hidden');}
   $('#placeModal').addEventListener('click',e=>{if(e.target.id==='placeModal'){pending=null;e.currentTarget.classList.add('hidden');}});
   function renderShop(filter='all'){
@@ -77,12 +81,16 @@
   $('.close-tip').addEventListener('click',e=>e.currentTarget.closest('.tip-card').remove());
   // Friendly, fully turn-based encounters.
   const foes=[{name:'Rusty Raptor',short:'RAPTOR',emoji:'🦖',hp:36,attack:8,reward:280,fossils:2},{name:'Bramble Raptor',short:'RAPTOR',emoji:'🦖',hp:43,attack:10,reward:330,fossils:2},{name:'Muddy Trike',short:'TRIKE',emoji:'🦕',hp:53,attack:9,reward:390,fossils:3},{name:'Ridgeback',short:'STEGOSAUR',emoji:'🦕',hp:62,attack:11,reward:470,fossils:4}];
-  function refreshBattleView(){if(!battle){$('#battleIntro').classList.remove('hidden');$('#battleActive').classList.add('hidden');$('#battleResult').classList.add('hidden');}}
-  function setupBattle(){const foe=foes[Math.min(state.wins,foes.length-1)];battle={foe,hp:foe.hp,maxHp:foe.hp,playerHp:42,maxPlayerHp:42,energy:3,turn:1,done:false};$('#playerFighter').textContent='🦕';$('#enemyFighter').textContent=foe.emoji;$('#enemyName').textContent=foe.name.toUpperCase();$('#fighterName').textContent='MOSS';$('#playerHpName').textContent='MOSS';$('#enemyHpName').textContent=foe.short;$('#battleLog').textContent=`${foe.name} steps into the clearing. Your move!`;$('#battleIntro').classList.add('hidden');$('#battleResult').classList.add('hidden');$('#battleActive').classList.remove('hidden');updateCombat();}
+  function nextFoe(){
+    const base=foes[Math.min(state.wins,foes.length-1)],extra=Math.max(0,state.wins-foes.length+1);
+    return {...base,name:extra?`Veteran ${base.name}`:base.name,hp:base.hp+extra*8,attack:base.attack+Math.floor(extra/2),reward:base.reward+extra*70,fossils:base.fossils+Math.floor(extra/2)};
+  }
+  function refreshBattleView(){if(!battle){$('#battleIntro').classList.remove('hidden');$('#battleActive').classList.add('hidden');$('#battleResult').classList.add('hidden');}const foe=nextFoe();$('.battle-reward b').innerHTML=`¢ ${foe.reward} <i>+ 🦴 ${foe.fossils}</i>`;}
+  function setupBattle(){const foe=nextFoe(),maxHp=42+(state.level-1)*4;battle={foe,hp:foe.hp,maxHp:foe.hp,playerHp:maxHp,maxPlayerHp:maxHp,energy:3,turn:1,done:false};$('#playerFighter').textContent='🦕';$('#enemyFighter').textContent=foe.emoji;$('#enemyName').textContent=foe.name.toUpperCase();$('#fighterName').textContent='MOSS';$('#playerHpName').textContent='MOSS';$('#enemyHpName').textContent=foe.short;$('#battleLog').textContent=`${foe.name} steps into the clearing. Your move!`;$('#battleIntro').classList.add('hidden');$('#battleResult').classList.add('hidden');$('#battleActive').classList.remove('hidden');updateCombat();}
   function updateCombat(){if(!battle)return;$('#playerHpNum').textContent=`${battle.playerHp} / ${battle.maxPlayerHp}`;$('#enemyHpNum').textContent=`${battle.hp} / ${battle.maxHp}`;$('#playerHpBar').style.width=`${Math.max(0,battle.playerHp/battle.maxPlayerHp*100)}%` ;$('#enemyHpBar').style.width=`${Math.max(0,battle.hp/battle.maxHp*100)}%`;$('#energyDots').textContent='● '.repeat(battle.energy)+'○ '.repeat(3-battle.energy);$('#turnLabel').textContent=String(battle.turn).padStart(2,'0');$$('.move-btn').forEach(b=>{b.disabled=(b.dataset.move==='leaf'&&battle.energy===0)||battle.done;b.style.opacity=b.disabled?'.48':'1';});}
   function movePlayer(move){if(!battle||battle.done)return;let damage=0,log='';
-    if(move==='stomp'){damage=14+Math.floor(Math.random()*6);log=`Moss stomps with a mighty thump for ${damage} damage!`;}
-    if(move==='leaf'){if(battle.energy<1)return;battle.energy--;damage=20+Math.floor(Math.random()*7);log=`A brilliant leaf burst! ${battle.foe.name} takes ${damage} damage.`;}
+    if(move==='stomp'){damage=14+Math.floor(Math.random()*6)+Math.floor((state.level-1)*1.5);log=`Moss stomps with a mighty thump for ${damage} damage!`;}
+    if(move==='leaf'){if(battle.energy<1)return;battle.energy--;damage=20+Math.floor(Math.random()*7)+Math.floor((state.level-1)*1.5);log=`A brilliant leaf burst! ${battle.foe.name} takes ${damage} damage.`;}
     if(move==='rest'){const heal=Math.min(10,battle.maxPlayerHp-battle.playerHp);battle.playerHp+=heal;battle.energy=Math.min(3,battle.energy+1);log=`Moss catches a breath and recovers ${heal} HP.`;}
     battle.hp=Math.max(0,battle.hp-damage);$('#battleLog').textContent=log;updateCombat();
     if(battle.hp===0){finishBattle(true);return;}$$('.move-btn').forEach(b=>b.disabled=true);
